@@ -1,0 +1,17 @@
+node_modules/
+.next/
+dist/
+.env*
+!.env.example
+.vercel/
+playwright-report/
+test-results/
+coverage/
+public/ocr/
+supabase/.temp/
+*.log
+*.tsbuildinfo
+.tmp-*
+.codex/
+.playwright-production.config.ts
+.DS_Store

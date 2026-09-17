@@ -1,0 +1,7 @@
+'use client';
+import {ArrowRightLeft,Clock3,FileText,History} from 'lucide-react';
+import {Empty,EmptyDescription,EmptyHeader,EmptyMedia,EmptyTitle} from '@/components/ui/empty';
+import {Item,ItemContent,ItemDescription,ItemGroup,ItemMedia,ItemTitle} from '@/components/ui/item';
+import type {Fact} from '@/domain/core';
+import {categories,dateLabel,money} from '@/domain/view';
+export function RecentFacts({facts}:{facts:Fact[]}){const rows=[...facts].sort((a,b)=>b.occurredAt.localeCompare(a.occurredAt)||b.createdAt.localeCompare(a.createdAt)).slice(0,5);if(!rows.length)return <Empty className="min-h-44 border bg-card"><EmptyHeader><EmptyMedia variant="icon"><History/></EmptyMedia><EmptyTitle>Nenhum fato ainda.</EmptyTitle><EmptyDescription>Seu histórico aparecerá aqui.</EmptyDescription></EmptyHeader></Empty>;return <ItemGroup className="gap-2">{rows.map(r=>{const Icon=r.kind==='request'?Clock3:r.kind==='event'?History:r.kind==='transfer'?ArrowRightLeft:FileText;return <Item key={r.id} variant="outline" className="bg-card"><ItemMedia variant="icon" className="bg-muted"><Icon/></ItemMedia><ItemContent><ItemTitle>{r.title}</ItemTitle><ItemDescription>{dateLabel(r.occurredAt)} · {categories[r.category]}</ItemDescription></ItemContent>{r.kind!=='event'&&<span className="ml-auto shrink-0 text-right text-sm tabular-nums"><span className="block font-semibold">{money(r.amountCents)}</span>{r.kind==='request'&&<span className="text-[11px] text-muted-foreground">Solicitado</span>}</span>}</Item>})}</ItemGroup>}

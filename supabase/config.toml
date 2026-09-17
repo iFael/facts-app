@@ -1,0 +1,12 @@
+project_id = "gpbsjmagjxpnoooldgtk"
+
+[auth.oauth_server]
+enabled = true
+authorization_url_path = "/"
+allow_dynamic_registration = true
+
+[functions.check-email]
+verify_jwt = false
+
+[functions.facts-mcp]
+verify_jwt = false

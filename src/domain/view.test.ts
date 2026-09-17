@@ -1,0 +1,14 @@
+import {describe,it,expect} from 'vitest';
+import {factSchema,validDate,validateFactRelationship,type Fact,type FactRelationship} from './core';
+import {parseMoney,requestPaid,summarize} from './view';
+const dependentId='22222222-2222-4222-8222-222222222222',stamp='2026-09-13T00:00:00.000Z';
+const fact=(id:string,kind:Fact['kind'],amountCents?:number,extra:Record<string,unknown>={})=>factSchema.parse({id,dependentId,kind,title:'Registro',category:'saude',notes:'',occurredAt:'2026-09-12',source:'ui',createdBy:'user',provenanceKind:'user_assertion',createdAt:stamp,updatedAt:stamp,...(kind==='event'?{}:{amountCents}),...(kind==='transfer'?{transferPurpose:'reembolso'}:{}),...extra});
+describe('valores, datas e vínculos',()=>{
+ it('converte centavos sem arredondamento binário',()=>{expect(parseMoney('R$ 1.234,56')).toBe(123456);expect(parseMoney('0,29')).toBe(29);});
+ it('rejeita casas extras, negativo e NaN',()=>{for(const value of ['1,234','-5','abc','1e3'])expect(()=>parseMoney(value)).toThrow();});
+ it('valida data civil inclusive bissexto',()=>{expect(validDate('2026-02-30')).toBe(false);expect(validDate('2024-02-29')).toBe(true);expect(validDate('2026-02-29')).toBe(false);});
+ it('acumula dois registros até o mês selecionado',()=>{const rows=[fact('11111111-1111-4111-8111-111111111111','transfer',123456,{occurredAt:'2026-08-20'}),fact('33333333-3333-4333-8333-333333333333','transfer',123456,{occurredAt:'2026-09-04'})];expect(summarize(rows,[],'2026-08')).toMatchObject({expenses:0,transfers:123456,total:123456,pending:0});expect(summarize(rows,[],'2026-09')).toMatchObject({expenses:0,transfers:246912,total:246912,pending:0});});
+ it('mantém solicitações pendentes globais mesmo fora do mês selecionado',()=>{const rows=[fact('11111111-1111-4111-8111-111111111111','expense',1000),fact('33333333-3333-4333-8333-333333333333','request',500,{occurredAt:'2026-08-12'})];expect(summarize(rows,[],'2026-09')).toMatchObject({expenses:1000,transfers:0,total:1000,pending:1});});
+ it('deriva pagamentos parciais dos relacionamentos',()=>{const request=fact('11111111-1111-4111-8111-111111111111','request',500),transfer=fact('33333333-3333-4333-8333-333333333333','transfer',200),expense=fact('44444444-4444-4444-8444-444444444444','expense',300),links=[{id:'66666666-6666-4666-8666-666666666666',kind:'fulfills_request',factId:transfer.id,requestId:request.id,createdAt:stamp},{id:'77777777-7777-4777-8777-777777777777',kind:'fulfills_request',factId:expense.id,requestId:request.id,createdAt:stamp}] as FactRelationship[];expect(requestPaid(request.id,[request,transfer,expense],links)).toBe(500);});
+ it('rejeita vínculo órfão',()=>{const expense=fact('11111111-1111-4111-8111-111111111111','expense',500);expect(()=>validateFactRelationship({id:'33333333-3333-4333-8333-333333333333',kind:'fulfills_request',factId:expense.id,requestId:'44444444-4444-4444-8444-444444444444',createdAt:stamp},[expense])).toThrow();});
+});
