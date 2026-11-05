@@ -62,7 +62,7 @@ type LedgerResult = {
 type Summary = {
   seen: number; ledger: number; imported: number; linkedExisting: number;
   replayed: number; needsReview: number; newReviews: number;
-  notificationsSent: number; notificationsFailed: number; skipped: number;
+  notificationsSent: number; notificationsFailed: number; insightsQueued: number; insightsSent: number; insightsFailed: number; skipped: number;
 };
 
 function response(body: unknown, status=200): Response {
@@ -288,6 +288,46 @@ async function flushNotifications(admin:DbClient,token:string,summary:Summary){
   }
 }
 
+
+const categoryLabels:Record<string,string>={
+ alimentacao:'Alimentação',saude:'Saúde',vestuario:'Vestuário',
+ transporte:'Transporte',higiene:'Higiene',educacao:'Educação',lazer:'Lazer',outros:'Outros',
+};
+async function flushMonthlyInsights(admin:DbClient,token:string,summary:Summary){
+ const {data,error}=await admin.rpc('facts_claim_monthly_insights',{p_limit:10});
+ if(error)throw Error('monthly_insights_claim_'+(error.code??'unknown'));
+ for(const alert of (Array.isArray(data)?data:[])){
+  try{
+   const res=await fetch(NOTIFY_URL,{
+    method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
+    body:JSON.stringify({
+     kind:'bank_insight',amountCents:Number(alert.current_cents),
+     previousCents:Number(alert.previous_cents),
+     periodMonth:String(alert.period_month).slice(0,7),
+     categoryLabel:categoryLabels[alert.category]??alert.category,
+     occurredAt:alert.period_month,direction:'outgoing',
+     counterparty:null,description:'Comparativo de gastos confirmados do Noah',
+     institution:null,classification:null,reason:null,reviewUrl:null,
+    }),
+    signal:AbortSignal.timeout(12000),
+   });
+   if(!res.ok)throw Error('insight_email_http_'+res.status);
+   const {error:markError}=await admin.from('facts_bank_insight_notifications')
+    .update({status:'sent',sent_at:new Date().toISOString(),last_error_code:null,updated_at:new Date().toISOString()})
+    .eq('id',alert.id);
+   if(markError)throw Error('insight_mark_sent_'+markError.code);
+   summary.insightsSent++;
+  }catch(error){
+   const reason=error instanceof Error?error.message:'insight_email_failed';
+   const {error:markError}=await admin.from('facts_bank_insight_notifications')
+    .update({status:'failed',last_error_code:reason.slice(0,100),updated_at:new Date().toISOString()})
+    .eq('id',alert.id);
+   if(markError)console.error('bank-sync insight_state_failure',markError.code);
+   summary.insightsFailed++;
+  }
+ }
+}
+
 Deno.serve(async(request)=>{
   if(request.method==='GET'&&new URL(request.url).pathname.endsWith('/health'))
     return response({status:'ok',service:'bank-sync'});
@@ -307,7 +347,7 @@ Deno.serve(async(request)=>{
   const isWebhook=safeEqual(bearer,'Bearer '+config.feedToken);
   if(!isCron&&!isWebhook)return response({error:'unauthorized'},401);
   const summary:Summary={seen:0,ledger:0,imported:0,linkedExisting:0,replayed:0,
-    needsReview:0,newReviews:0,notificationsSent:0,notificationsFailed:0,skipped:0};
+    needsReview:0,newReviews:0,notificationsSent:0,notificationsFailed:0,insightsQueued:0,insightsSent:0,insightsFailed:0,skipped:0};
   const today=new Date().toISOString().slice(0,10);
   try{
     for(const settings of config.settings){
@@ -351,9 +391,17 @@ Deno.serve(async(request)=>{
         .update({last_synced_at:new Date().toISOString(),updated_at:new Date().toISOString()})
         .eq('owner_id',settings.ownerId);
       if(updateError)throw Error('sync_cursor_update_'+updateError.code);
+      const lastMonth=new Date(today.slice(0,7)+'-01T12:00:00.000Z');
+      lastMonth.setUTCMonth(lastMonth.getUTCMonth()-1);
+      const {data:queued,error:insightError}=await admin.rpc('facts_queue_monthly_insights',{
+       p_owner:settings.ownerId,p_month:lastMonth.toISOString().slice(0,10),
+      });
+      if(insightError)throw Error('insights_queue_'+insightError.code);
+      summary.insightsQueued+=Number(queued??0);
     }
     await flushNotifications(admin,config.feedToken,summary);
-    return response({ok:summary.notificationsFailed===0,...summary});
+    await flushMonthlyInsights(admin,config.feedToken,summary);
+    return response({ok:summary.notificationsFailed===0&&summary.insightsFailed===0,...summary});
   }catch(error){
     console.error('bank-sync',error instanceof Error?error.message:'unknown');
     return response({error:'bank_sync_failed',summary},502);
