@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "next dev -H 127.0.0.1",
-    "build": "tsc --noEmit && next build",
+    "build": "npm test && tsc --noEmit && next build",
     "start": "next start -H 127.0.0.1",
     "preview": "next start -H 127.0.0.1",
     "typecheck": "tsc --noEmit",
