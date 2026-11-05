@@ -55,6 +55,7 @@ export function planAgataTransfer(
   const amount = moneyToCents(transaction.amount);
   if (amount !== rule.pensionAmountCents)
     return { type: 'review', reason: 'agata_outgoing_other', suggested: 'adicional' };
+  if (hasExactExistingPension) return { type: 'auto_pension' };
   const day = Number(transaction.chargeDate.slice(8, 10));
   if (day < rule.pensionDayStart || day > rule.pensionDayEnd)
     return { type: 'review', reason: 'pension_outside_window', suggested: 'pensao' };
