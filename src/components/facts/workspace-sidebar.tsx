@@ -1,19 +1,20 @@
 'use client';
 
-import {BarChart3,Clock3,Files,House,Landmark,Rows3} from 'lucide-react';
+import {ArrowLeftRight,BarChart3,Clock3,Files,House,Landmark,Rows3} from 'lucide-react';
 import {ThemeSwitch} from '@/components/facts/theme-switch';
 import {
  Sidebar,SidebarContent,SidebarFooter,SidebarGroup,SidebarGroupContent,
  SidebarHeader,SidebarMenu,SidebarMenuButton,SidebarMenuItem,SidebarRail,SidebarTrigger,useSidebar
 } from '@/components/ui/sidebar';
 
-export type WorkspaceTab='home'|'statement'|'facts'|'requests'|'documents'|'reports'|'data';
+export type WorkspaceTab='home'|'bank'|'statement'|'facts'|'requests'|'documents'|'reports'|'data';
 
 type Props={tab:WorkspaceTab;onTabChange:(tab:WorkspaceTab)=>void;dependentName?:string};
 
 const items=[
  {id:'home' as const,label:'Início',icon:House},
  {id:'statement' as const,label:'Extrato',icon:Landmark},
+ {id:'bank' as const,label:'Conciliação',icon:ArrowLeftRight},
  {id:'facts' as const,label:'Fatos',icon:Rows3},
  {id:'requests' as const,label:'Solicitações',icon:Clock3},
  {id:'documents' as const,label:'Documentos',icon:Files},
