@@ -51,6 +51,7 @@ export function BankCenter({
 }){
  const [rows,setRows]=useState<Ledger[]>([]);
  const [reviews,setReviews]=useState<Review[]>([]);
+ const [reviewRows,setReviewRows]=useState<Ledger[]>([]);
  const [setting,setSetting]=useState<Setting|null>(null);
  const [loading,setLoading]=useState(true),[more,setMore]=useState(true),[fetching,setFetching]=useState(false);
  const [error,setError]=useState('');
@@ -74,6 +75,15 @@ export function BankCenter({
    if(tx.error)throw tx.error;
    if(rv.error)throw rv.error;
    if(settings.error)throw settings.error;
+   const reviewIds=(rv.data??[]).map(row=>row.transaction_id);
+   const missing=reviewIds.filter(id=>!(tx.data??[]).some(row=>row.id===id));
+   if(missing.length){
+    const extra=await supabase.from('facts_bank_transactions')
+     .select('id,occurred_at,amount_cents,direction,description,institution,merchant_name,counterparty_name,classification,relevance,sync_state,fact_id,provider_transaction_id')
+     .eq('owner_id',userId).in('id',missing.slice(0,250));
+    if(extra.error)throw extra.error;
+    setReviewRows((extra.data??[]) as Ledger[]);
+   }else setReviewRows([]);
    const received=(tx.data??[]) as Ledger[];
    setRows(previous=>append?[...previous,...received]:received);
    setMore(received.length===perPage);
@@ -93,7 +103,7 @@ export function BankCenter({
  // eslint-disable-next-line react-hooks/exhaustive-deps
  },[userId]);
  const insights=useMemo(()=>calculateFinancialInsights(facts,today()),[facts]);
- const indexed=useMemo(()=>new Map(rows.map(row=>[row.id,row])),[rows]);
+ const indexed=useMemo(()=>new Map([...reviewRows,...rows].map(row=>[row.id,row])),[reviewRows,rows]);
  const filtered=useMemo(()=>rows.filter(row=>{
   const q=search.trim().toLocaleLowerCase('pt-BR');
   return !q||[row.description,row.merchant_name,row.counterparty_name,row.institution].some(
