@@ -15,6 +15,9 @@ alter table public.facts_bank_transactions
   drop constraint if exists facts_bank_transactions_classification_check,
   drop constraint if exists facts_bank_transactions_sync_state_check;
 alter table public.facts_bank_transactions
+  drop constraint if exists facts_bank_transactions_relevance_check,
+  drop constraint if exists facts_bank_transactions_relevance_confidence_check;
+alter table public.facts_bank_transactions
   add constraint facts_bank_transactions_classification_check
     check (classification is null or classification in ('pensao','adicional','reembolso','noah_expense')),
   add constraint facts_bank_transactions_sync_state_check
