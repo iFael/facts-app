@@ -1,7 +1,7 @@
 'use client';
 
 import {useState} from 'react';
-import {BarChart3,Clock3,Database,Files,House,Landmark,Menu,Rows3} from 'lucide-react';
+import {ArrowLeftRight,BarChart3,Clock3,Database,Files,House,Landmark,Menu,Rows3} from 'lucide-react';
 import {Button} from '@/components/ui/button';
 import {Drawer,DrawerContent,DrawerDescription,DrawerHeader,DrawerTitle} from '@/components/ui/drawer';
 import type {WorkspaceTab} from './workspace-sidebar';
@@ -16,12 +16,13 @@ export function MobileNavigation({tab,onTabChange}:Props){
    <NavButton active={tab==='home'} label="Início" icon={<House/>} onClick={()=>choose('home')}/>
    <NavButton active={tab==='statement'} label="Extrato" icon={<Landmark/>} onClick={()=>choose('statement')}/>
    <NavButton active={tab==='facts'} label="Fatos" icon={<Rows3/>} onClick={()=>choose('facts')}/>
-   <NavButton active={['requests','documents','reports','data'].includes(tab)} label="Mais" icon={<Menu/>} onClick={()=>setMoreOpen(true)}/>
+   <NavButton active={['bank','requests','documents','reports','data'].includes(tab)} label="Mais" icon={<Menu/>} onClick={()=>setMoreOpen(true)}/>
   </nav>
   <Drawer open={moreOpen} onOpenChange={setMoreOpen} showSwipeHandle>
    <DrawerContent>
     <DrawerHeader className="text-left"><DrawerTitle>Mais</DrawerTitle><DrawerDescription>Outras áreas do seu histórico.</DrawerDescription></DrawerHeader>
     <div className="grid gap-2 px-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+     <MoreButton active={tab==='bank'} icon={<ArrowLeftRight/>} label="Conciliação" onClick={()=>choose('bank')}/>
      <MoreButton active={tab==='requests'} icon={<Clock3/>} label="Solicitações" onClick={()=>choose('requests')}/>
      <MoreButton active={tab==='documents'} icon={<Files/>} label="Documentos" onClick={()=>choose('documents')}/>
      <MoreButton active={tab==='reports'} icon={<BarChart3/>} label="Relatórios" onClick={()=>choose('reports')}/>
