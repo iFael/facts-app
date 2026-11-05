@@ -47,7 +47,7 @@ export function App(){
 function Workspace({userId,serviceWorker}:{userId:string;serviceWorker:ReturnType<typeof useServiceWorkerUpdate>}){
  const {state,error,loading,refreshing,online,refresh,documentsService}=useFacts(userId);
  const [tab,setTab]=useState<WorkspaceTab>('home'),[requestedReview,setRequestedReview]=useState<string|null>(null),[month,setMonth]=useState(today().slice(0,7)),[search,setSearch]=useState(''),[filterKind,setFilterKind]=useState(''),[filterCategory,setFilterCategory]=useState('');
- useEffect(()=>{const id=new URLSearchParams(window.location.search).get('review');if(id){setRequestedReview(id);setTab('bank');}},[]);
+ useEffect(()=>{const params=new URLSearchParams(window.location.search);const id=params.get('review');if(id||params.has('bank')){setRequestedReview(id);setTab('bank');}},[]);
  const changeTab=(next:WorkspaceTab)=>{if(['home','statement','reports'].includes(next)&&!month)setMonth(today().slice(0,7));setTab(next);};
  if(loading)return <main className="grid min-h-dvh place-content-center justify-items-center gap-3"><p className="text-sm text-muted-foreground">Carregando seus dados…</p>{error&&<p role="alert" className="text-sm text-destructive">{error}</p>}</main>;
  const dependentData=state?.dependent??null,allFacts=state?.facts??[],relationships=state?.relationships??[],documents=state?.documents??[],displayName=dependentData?.name?.trim()||'Seu dependente';
