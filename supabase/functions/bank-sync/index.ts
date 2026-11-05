@@ -129,7 +129,9 @@ Deno.serve(async request=>{
     });
     if(imported.error)throw new Error(`bank_import_failed:${imported.error.code??'unknown'}`);
     const status=typeof imported.data?.status==='string'?imported.data.status:'';
-    if(status==='imported')summary.imported++;
+    const replayed=imported.data?.replayed===true;
+    if(replayed)summary.replayed++;
+    else if(status==='imported')summary.imported++;
     else if(status==='linked_existing')summary.linkedExisting++;
     else if(status==='needs_review')summary.needsReview++;
     else summary.replayed++;
