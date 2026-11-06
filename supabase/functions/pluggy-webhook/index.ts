@@ -1,6 +1,6 @@
 import {createClient} from 'npm:@supabase/supabase-js@2.116.0';
 
-const SYNC='https://gpbsjmagjxpnoooldgtk.supabase.co/functions/v1/bank-sync';
+const SYNC='https://gpbsjmagjxpnoooldgtk.supabase.co/functions/v1/bank-sync-candidate';
 type Payload={event?:unknown;eventId?:unknown;itemId?:unknown;clientId?:unknown;transactionIds?:unknown};
 function respond(status:number,body:Record<string,unknown>){
  return new Response(JSON.stringify(body),{
