@@ -43,13 +43,19 @@ export class FactsPluggyClient{
   return this.request('GET','/items/'+encodeURIComponent(itemId));
  }
  async accounts(itemId:string):Promise<Array<{id:string;type:string;name:string|null}>>{
-  const data=await this.request('GET','/accounts?itemId='+encodeURIComponent(itemId));
-  if(!Array.isArray(data.results))throw Error('PLUGGY_ACCOUNTS_INVALID');
-  return data.results.map(item=>{
-   const row=record(item),id=stringValue(row.id),type=stringValue(row.type);
-   if(!id||!type)throw Error('PLUGGY_ACCOUNT_INVALID');
-   return{id,type,name:stringValue(row.marketingName)||stringValue(row.name)};
-  });
+  const rows:Array<{id:string;type:string;name:string|null}>=[];
+  for(let page=1;page<=50;page++){
+   const qs=new URLSearchParams({itemId,page:String(page),pageSize:'500'});
+   const data=await this.request('GET','/accounts?'+qs);
+   if(!Array.isArray(data.results))throw Error('PLUGGY_ACCOUNTS_INVALID');
+   for(const item of data.results){
+    const row=record(item),id=stringValue(row.id),type=stringValue(row.type);
+    if(!id||!type)throw Error('PLUGGY_ACCOUNT_INVALID');
+    rows.push({id,type,name:stringValue(row.marketingName)||stringValue(row.name)});
+   }
+   if(typeof data.totalPages!=='number'||page>=data.totalPages)return rows;
+  }
+  throw Error('PLUGGY_ACCOUNTS_PAGE_LIMIT');
  }
  async *transactions(accountId:string,from:string):AsyncGenerator<JsonRecord>{
   const search=new URLSearchParams({accountId,dateFrom:from});
@@ -83,7 +89,7 @@ export class FactsPluggyClient{
   if(!Array.isArray(list.results))throw Error('PLUGGY_WEBHOOK_LIST_INVALID');
   if(list.results.some(item=>{
    const row=record(item);
-   return row.url===url&&row.event==='all'&&row.disabledAt===null;
+   return row.url===url&&row.event==='all'&&row.disabledAt==null;
   }))return;
   await this.request('POST','/webhooks',{
    url,event:'all',headers:{'X-Facts-Webhook-Secret':secret},
