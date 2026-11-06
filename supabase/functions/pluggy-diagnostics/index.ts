@@ -81,25 +81,25 @@ Deno.serve(async request=>{
       const info=await callApi(API+'/items/'+encodeURIComponent(itemId),{headers});
       const accounts=await callApi(API+'/accounts?itemId='+encodeURIComponent(itemId),{headers});
       const accountList=Array.isArray(accounts.body?.results)?accounts.body.results:[];
-      const firstAccount=accountList.map(object).find(a=>a&&typeof a.id==='string');
-      let transactions:{status:number;count:number|null;cursorShape:string|null}|null=null;
-      if(firstAccount&&typeof firstAccount.id==='string'){
-        const qs=new URLSearchParams({
-          accountId:firstAccount.id,dateFrom:'2026-10-01',
-        });
+      const accountResults:Array<RecordLike>=[];
+      for(const candidate of accountList){
+        const account=object(candidate);
+        if(!account||typeof account.id!=='string')continue;
+        const qs=new URLSearchParams({accountId:account.id,dateFrom:'2026-10-01'});
         const tx=await callApi(API+'/v2/transactions?'+qs.toString(),{headers});
-        transactions={
-          status:tx.status,
-          count:Array.isArray(tx.body?.results)?tx.body.results.length:null,
-          cursorShape:typeof tx.body?.next,
-        };
+        accountResults.push({
+          accountType:account.type??null,
+          transactionStatus:tx.status,
+          firstPageCount:Array.isArray(tx.body?.results)?tx.body.results.length:null,
+          hasNextPage:typeof tx.body?.next==='string',
+        });
       }
       probes.push({
         registered:true,
         itemStatus:info.status,
         accountsStatus:accounts.status,
         accountsCount:accountList.length,
-        transactions,
+        accounts:accountResults,
       });
     }
     return result({
