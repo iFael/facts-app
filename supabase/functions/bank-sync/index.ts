@@ -1,13 +1,14 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 import { z } from 'npm:zod@4.6.4';
+import { FactsPluggyClient } from '../_shared/pluggy.ts';
+import { mapPluggyTransaction } from '../../../src/bank/pluggy-mapper.ts';
 import {
   isPostedTransaction, matchRecipient, moneyToCents, normalizeBankText,
   overlapStart, planAgataTransfer, probableNoahExpense, signedMoneyToCents,
   type BankFeedTransaction, type RecipientRule,
 } from '../../../src/bank/automation.ts';
 
-const FEED_URL = 'https://ciclo-peach.vercel.app/api/integrations/facts';
-const NOTIFY_URL = 'https://ciclo-peach.vercel.app/api/integrations/facts/notify';
+const RESEND_API='https://api.resend.com/emails';
 const FACTS_URL = 'https://facts-app-nu.vercel.app/';
 const jsonHeaders = { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' };
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
@@ -31,29 +32,19 @@ const learningSchema = z.object({
   matchValue: z.string().min(1), direction: z.enum(['outgoing','incoming']).nullable(),
   action: z.enum(['noah_expense','ignore']), category: z.string().nullable(),
 });
+const connectionSchema=z.object({
+  ownerId:z.string().uuid(),itemId:z.string().uuid(),
+  institution:z.string().nullable(),status:z.literal('active'),
+  lastSyncedAt:z.string().nullable(),
+});
 const configSchema = z.object({
-  feedToken: z.string().min(16), cronSecret: z.string().min(16),
-  settings: z.array(settingSchema), rules: z.array(ruleSchema),
-  learningRules: z.array(learningSchema),
+  clientId:z.string().nullable(),clientSecret:z.string().nullable(),
+  webhookSecret:z.string().min(16),cronSecret:z.string().min(16),
+  emailKey:z.string().nullable(),emailTo:z.string().nullable(),emailFrom:z.string().nullable(),
+  settings:z.array(settingSchema),rules:z.array(ruleSchema),
+  learningRules:z.array(learningSchema),connections:z.array(connectionSchema),
 });
-const transactionSchema = z.object({
-  id: z.string().min(1).max(200), itemId: z.string().min(1).max(200),
-  accountId: z.string().min(1).max(200), amount: z.number().finite(),
-  originalAmount: z.number().finite().nullable(),
-  chargeDate: z.string().regex(datePattern), type: z.string().nullable(),
-  status: z.string().nullable(), category: z.string().nullable(),
-  operationType: z.string().nullable(), description: z.string().max(2000),
-  descriptionRaw: z.string().nullable(), merchantName: z.string().nullable(),
-  counterpartyName: z.string().nullable(),
-  counterpartyKind: z.enum(['person','business']).nullable(),
-  paymentMethod: z.string().nullable(), foreignCharge: z.boolean(),
-  institution: z.string().nullable(),
-});
-const feedSchema = z.object({
-  ok: z.literal(true), transactions: z.array(transactionSchema).max(500),
-  nextPage: z.number().int().nonnegative().nullable(),
-});
-
+type MailConfiguration={key:string;recipient:string;sender:string};
 type DbClient = ReturnType<typeof createClient>;
 type LedgerResult = {
   id: string; providerId: string; new: boolean; changed: boolean;
@@ -85,17 +76,43 @@ function monthEnd(month: string): string {
   return date.toISOString().slice(0,10);
 }
 
-async function fetchFeed(
-  token:string,from:string,page:number,refresh:boolean,
-):Promise<{transactions:BankFeedTransaction[];nextPage:number|null}>{
-  const url=new URL(FEED_URL);
-  url.searchParams.set('from',from);
-  url.searchParams.set('page',String(page));
-  url.searchParams.set('refresh',refresh?'1':'0');
-  const r=await fetch(url,{headers:{Authorization:'Bearer '+token,Accept:'application/json'},
-    signal:AbortSignal.timeout(45000)});
-  if(!r.ok)throw Error('feed_http_'+r.status);
-  return feedSchema.parse(await r.json());
+
+function businessDate():string{
+  return new Intl.DateTimeFormat('sv-SE',{timeZone:'America/Sao_Paulo'}).format(new Date());
+}
+async function sendFactsEmail(
+  config:MailConfiguration,id:string,subject:string,body:string,
+):Promise<void>{
+  const r=await fetch(RESEND_API,{
+    method:'POST',headers:{
+      Authorization:'Bearer '+config.key,
+      'Content-Type':'application/json','Idempotency-Key':'facts-'+id,
+    },
+    body:JSON.stringify({from:config.sender,to:[config.recipient],subject,text:body}),
+    signal:AbortSignal.timeout(12000),
+  });
+  if(!r.ok)throw Error('email_http_'+r.status);
+}
+function notificationText(
+  kind:string,bank:Record<string,unknown>,reason:string|null,reviewId:string|null,
+):{subject:string;body:string}{
+  const cents=Number(bank.amount_cents??0);
+  const amount=new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(cents/100);
+  const date=String(bank.occurred_at??'').split('-').reverse().join('/');
+  const direction=bank.direction==='incoming'?'recebido':'enviado';
+  return{
+    subject:kind==='bank_review'?'Facts — confirmação necessária: '+amount:'Facts — movimentação reconhecida: '+amount,
+    body:[
+      kind==='bank_review'?'Uma movimentação precisa da sua confirmação.':'Uma movimentação foi conciliada.',
+      'Valor: '+amount,'Data: '+date,'Movimento: '+direction,
+      'Instituição: '+String(bank.institution??'não informada'),
+      'Contraparte: '+String(bank.counterparty_name??'não identificada'),
+      'Descrição: '+String(bank.description??'não informada'),
+      reason?'Motivo da revisão: '+reason:null,
+      reviewId?'Revisar no Facts: '+FACTS_URL+'?review='+encodeURIComponent(reviewId):
+        'Abrir Facts: '+FACTS_URL+'?bank=1',
+    ].filter(Boolean).join('\n'),
+  };
 }
 
 async function storePage(admin:DbClient,ownerId:string,rows:BankFeedTransaction[]):Promise<LedgerResult[]>{
@@ -235,15 +252,16 @@ async function processEntries(
   }
 }
 
-async function flushNotifications(admin:DbClient,token:string,summary:Summary){
+
+async function flushNotifications(admin:DbClient,mail:MailConfiguration|null,summary:Summary){
+  if(!mail)return;
   const {data,error}=await admin.rpc('facts_claim_bank_notifications',{p_limit:20});
   if(error)throw Error('notification_claim_'+(error.code??'unknown'));
   for(const job of (Array.isArray(data)?data:[])){
-    let failure:string|null=null;
     try{
-      const {data:bank,error:txError}=await admin.from('facts_bank_transactions')
+      const {data:bank,error:bankError}=await admin.from('facts_bank_transactions')
         .select('*').eq('id',job.transaction_id).eq('owner_id',job.owner_id).single();
-      if(txError||!bank)throw Error('notification_bank_missing');
+      if(bankError||!bank)throw Error('notification_bank_missing');
       let reviewId:string|null=null;
       let reason:string|null=null;
       if(job.kind==='bank_review'){
@@ -252,33 +270,23 @@ async function flushNotifications(admin:DbClient,token:string,summary:Summary){
           .eq('transaction_id',job.transaction_id).maybeSingle();
         if(reviewError)throw Error('notification_review_read');
         if(!review||review.status!=='pending'){
-          const {error:markError}=await admin.from('facts_bank_notifications')
-            .update({status:'sent',sent_at:new Date().toISOString(),updated_at:new Date().toISOString()})
-            .eq('id',job.id);
-          if(markError)throw Error('notification_mark_resolved');
+          const {error:skipError}=await admin.from('facts_bank_notifications').update({
+            status:'sent',sent_at:new Date().toISOString(),updated_at:new Date().toISOString(),
+          }).eq('id',job.id);
+          if(skipError)throw Error('notification_skip_'+skipError.code);
           continue;
         }
         reviewId=review.id;reason=review.reason;
       }
-      const payload={
-        kind:job.kind,amountCents:Number(bank.amount_cents),occurredAt:bank.occurred_at,
-        direction:bank.direction,counterparty:bank.counterparty_name,
-        description:bank.description??'Movimentação bancária',
-        institution:bank.institution,classification:bank.classification,reason,
-        reviewUrl:reviewId?FACTS_URL+'?review='+encodeURIComponent(reviewId):null,
-      };
-      const res=await fetch(NOTIFY_URL,{
-        method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
-        body:JSON.stringify(payload),signal:AbortSignal.timeout(12000),
-      });
-      if(!res.ok)throw Error('notification_http_'+res.status);
-      const {error:markError}=await admin.from('facts_bank_notifications')
-        .update({status:'sent',sent_at:new Date().toISOString(),updated_at:new Date().toISOString(),last_error_code:null})
-        .eq('id',job.id);
-      if(markError)throw Error('notification_mark_sent');
+      const message=notificationText(job.kind,bank,reason,reviewId);
+      await sendFactsEmail(mail,job.id,message.subject,message.body);
+      const {error:markError}=await admin.from('facts_bank_notifications').update({
+        status:'sent',sent_at:new Date().toISOString(),updated_at:new Date().toISOString(),last_error_code:null,
+      }).eq('id',job.id);
+      if(markError)throw Error('notification_mark_sent_'+markError.code);
       summary.notificationsSent++;
     }catch(err){
-      failure=err instanceof Error?err.message:'email_unknown_error';
+      const failure=err instanceof Error?err.message:'notification_failed';
       summary.notificationsFailed++;
       const {error:markError}=await admin.from('facts_bank_notifications')
         .update({status:'failed',last_error_code:failure.slice(0,100),updated_at:new Date().toISOString()})
@@ -287,31 +295,29 @@ async function flushNotifications(admin:DbClient,token:string,summary:Summary){
     }
   }
 }
-
-
 const categoryLabels:Record<string,string>={
  alimentacao:'Alimentação',saude:'Saúde',vestuario:'Vestuário',
  transporte:'Transporte',higiene:'Higiene',educacao:'Educação',lazer:'Lazer',outros:'Outros',
 };
-async function flushMonthlyInsights(admin:DbClient,token:string,summary:Summary){
+async function flushMonthlyInsights(admin:DbClient,mail:MailConfiguration|null,summary:Summary){
+ if(!mail)return;
  const {data,error}=await admin.rpc('facts_claim_monthly_insights',{p_limit:10});
  if(error)throw Error('monthly_insights_claim_'+(error.code??'unknown'));
  for(const alert of (Array.isArray(data)?data:[])){
   try{
-   const res=await fetch(NOTIFY_URL,{
-    method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
-    body:JSON.stringify({
-     kind:'bank_insight',amountCents:Number(alert.current_cents),
-     previousCents:Number(alert.previous_cents),
-     periodMonth:String(alert.period_month).slice(0,7),
-     categoryLabel:categoryLabels[alert.category]??alert.category,
-     occurredAt:alert.period_month,direction:'outgoing',
-     counterparty:null,description:'Comparativo de gastos confirmados do Noah',
-     institution:null,classification:null,reason:null,reviewUrl:null,
-    }),
-    signal:AbortSignal.timeout(12000),
-   });
-   if(!res.ok)throw Error('insight_email_http_'+res.status);
+   const current=Number(alert.current_cents),previous=Number(alert.previous_cents);
+   const format=(cents:number)=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(cents/100);
+   const label=categoryLabels[alert.category]??alert.category;
+   const percent=Math.round((current-previous)/previous*100);
+   await sendFactsEmail(
+     mail,alert.id,'Facts — aumento de gastos em '+label,
+     ['Alerta estatístico dos gastos confirmados do Noah.',
+      'Categoria: '+label,'Mês: '+String(alert.period_month).slice(0,7),
+      'Mês anterior: '+format(previous),'Mês analisado: '+format(current),
+      'Aumento: '+percent+'%',
+      'Apenas despesas confirmadas entram neste cálculo.',
+      'Abrir Facts: '+FACTS_URL+'?bank=1'].join('\n'),
+   );
    const {error:markError}=await admin.from('facts_bank_insight_notifications')
     .update({status:'sent',sent_at:new Date().toISOString(),last_error_code:null,updated_at:new Date().toISOString()})
     .eq('id',alert.id);
@@ -336,28 +342,25 @@ Deno.serve(async(request)=>{
   const role=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')??'';
   if(!url||!role)return response({error:'bank_configuration'},500);
   const admin=createClient(url,role,{auth:{persistSession:false,autoRefreshToken:false}});
-  const {data:rawConfig,error:configError}=await admin.rpc('facts_bank_runtime_config');
+  const {data:rawConfig,error:configError}=await admin.rpc('facts_pluggy_runtime_config');
   if(configError)return response({error:'bank_configuration',code:configError.code},500);
   const configResult=configSchema.safeParse(rawConfig);
   if(!configResult.success)return response({error:'bank_configuration'},500);
   const config=configResult.data;
   const cron=request.headers.get('x-facts-sync-secret')??'';
-  const bearer=request.headers.get('authorization')??'';
   const isCron=safeEqual(cron,config.cronSecret);
-  const isWebhook=safeEqual(bearer,'Bearer '+config.feedToken);
-  if(!isCron&&!isWebhook)return response({error:'unauthorized'},401);
+  if(!isCron)return response({error:'unauthorized'},401);
+  if(!config.clientId||!config.clientSecret)return response({error:'pluggy_not_configured'},503);
+  const pluggy=new FactsPluggyClient(config.clientId,config.clientSecret);
+  const mail:MailConfiguration|null=config.emailKey&&config.emailTo&&config.emailFrom
+    ?{key:config.emailKey,recipient:config.emailTo,sender:config.emailFrom}:null;
   const summary:Summary={seen:0,ledger:0,imported:0,linkedExisting:0,replayed:0,
     needsReview:0,newReviews:0,notificationsSent:0,notificationsFailed:0,insightsQueued:0,insightsSent:0,insightsFailed:0,skipped:0};
-  const today=new Date().toISOString().slice(0,10);
+  const today=businessDate();
   try{
     for(const settings of config.settings){
       const rules=config.rules.filter((rule)=>rule.ownerId===settings.ownerId) as RecipientRule[];
       const learning=config.learningRules.filter((rule)=>rule.ownerId===settings.ownerId);
-      const {data:latest,error:latestError}=await admin.from('facts_bank_transactions')
-        .select('occurred_at').eq('owner_id',settings.ownerId).lte('occurred_at',today)
-        .order('occurred_at',{ascending:false}).limit(1).maybeSingle();
-      if(latestError)throw Error('ledger_cursor_'+latestError.code);
-      const from=settings.lastSyncedAt?overlapStart(settings.ledgerFrom,latest?.occurred_at??null):settings.ledgerFrom;
       const {data:facts,error:factsError}=await admin.from('facts')
         .select('id,occurred_at,amount_cents')
         .eq('owner_id',settings.ownerId).eq('dependent_id',settings.dependentId)
@@ -376,17 +379,44 @@ Deno.serve(async(request)=>{
         if(row.fact_id)linkedIds.add(row.fact_id);
         if(row.competence_month)pensionMonths.add(row.competence_month);
       }
-      let page=0;
-      while(page<100){
-        const feed=await fetchFeed(config.feedToken,from,page,isCron&&page===0);
-        summary.seen+=feed.transactions.length;
-        const stored=await storePage(admin,settings.ownerId,feed.transactions);
-        await processEntries(admin,settings,rules,learning,feed.transactions,stored,summary,today,
-          pensionMonths,knownPensions,linkedIds);
-        if(feed.nextPage===null)break;
-        page=feed.nextPage;
+
+      const connections=config.connections.filter(connection=>connection.ownerId===settings.ownerId);
+      if(!connections.length)throw Error('pluggy_connections_missing');
+      for(const connection of connections){
+        const from=connection.lastSyncedAt
+          ?overlapStart(settings.ledgerFrom,connection.lastSyncedAt.slice(0,10))
+          :settings.ledgerFrom;
+        const details=await pluggy.item(connection.itemId);
+        const institution=connection.institution||
+          (details.connector&&typeof details.connector==='object'&&
+           typeof (details.connector as Record<string,unknown>).name==='string'
+            ?(details.connector as {name:string}).name:null);
+        const accounts=await pluggy.accounts(connection.itemId);
+        for(const account of accounts){
+          let batch:BankFeedTransaction[]=[];
+          const flush=async()=>{
+            if(!batch.length)return;
+            summary.seen+=batch.length;
+            const stored=await storePage(admin,settings.ownerId,batch);
+            await processEntries(admin,settings,rules,learning,batch,stored,summary,today,
+              pensionMonths,knownPensions,linkedIds);
+            batch=[];
+          };
+          for await(const raw of pluggy.transactions(account.id,from)){
+            batch.push(mapPluggyTransaction(
+              raw as Parameters<typeof mapPluggyTransaction>[0],
+              connection.itemId,account.id,institution,
+            ));
+            if(batch.length>=150)await flush();
+          }
+          await flush();
+        }
+        const {error:connError}=await admin.from('facts_pluggy_connections').update({
+          last_synced_at:new Date().toISOString(),
+          last_error_code:null,updated_at:new Date().toISOString(),
+        }).eq('owner_id',settings.ownerId).eq('item_id',connection.itemId);
+        if(connError)throw Error('connection_checkpoint_'+connError.code);
       }
-      if(page>=100)throw Error('bank_feed_page_limit');
       const {error:updateError}=await admin.from('facts_bank_settings')
         .update({last_synced_at:new Date().toISOString(),updated_at:new Date().toISOString()})
         .eq('owner_id',settings.ownerId);
@@ -399,9 +429,10 @@ Deno.serve(async(request)=>{
       if(insightError)throw Error('insights_queue_'+insightError.code);
       summary.insightsQueued+=Number(queued??0);
     }
-    await flushNotifications(admin,config.feedToken,summary);
-    await flushMonthlyInsights(admin,config.feedToken,summary);
-    return response({ok:summary.notificationsFailed===0&&summary.insightsFailed===0,...summary});
+    await flushNotifications(admin,mail,summary);
+    await flushMonthlyInsights(admin,mail,summary);
+    return response({ok:summary.notificationsFailed===0&&summary.insightsFailed===0,
+      mailConfigured:mail!==null,...summary});
   }catch(error){
     console.error('bank-sync',error instanceof Error?error.message:'unknown');
     return response({error:'bank_sync_failed',summary},502);
