@@ -110,6 +110,7 @@ export function BankCenter({
    value=>value?.toLocaleLowerCase('pt-BR').includes(q));
  }),[rows,search]);
  const related=rows.filter(row=>row.relevance==='agata'||row.relevance==='noah').length;
+ const orderedReviews=useMemo(()=>[...reviews].sort((a,b)=>a.id===initialReview?-1:b.id===initialReview?1:0),[reviews,initialReview]);
  const lastSync=setting?.last_synced_at
   ?new Date(setting.last_synced_at).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'})
   :'Aguardando primeira sincronização';
@@ -133,7 +134,7 @@ export function BankCenter({
    <h3 className="text-base font-semibold">Decisões necessárias {reviews.length>0&&<Badge variant="outline">{reviews.length}</Badge>}</h3>
    {reviews.length===0&&!loading&&<Card><CardContent className="flex items-center gap-3 py-4 text-sm text-muted-foreground">
     <CheckCircle2 className="size-5 shrink-0"/> Nenhuma movimentação aguardando confirmação.</CardContent></Card>}
-   {reviews.map(review=><ReviewCard key={review.id} review={review}
+   {orderedReviews.map(review=><ReviewCard key={review.id} review={review}
     transaction={indexed.get(review.transaction_id)??null}
     focused={initialReview===review.id}
     onSuccess={async()=>{await load(false);await onFactsChange();}}/>)}
@@ -182,7 +183,7 @@ export function BankCenter({
       <p className="truncate text-xs text-muted-foreground">{dateLabel(row.occurred_at)} · {row.institution??'Instituição não informada'}</p></div>
      <div className="shrink-0 text-right"><p className="text-sm font-semibold tabular-nums">
       {row.direction==='incoming'?'+':'−'} {money(row.amount_cents)}</p>
-      <p className="text-xs text-muted-foreground">{row.classification? (actionLabels[row.classification]??row.classification):row.relevance==='unknown'?'Não classificado':row.relevance==='irrelevant'?'Não relacionado':row.relevance==='agata'?'Relacionado à Agata':'Possível Noah'}</p></div>
+      <p className={row.sync_state==='needs_review'?'text-xs text-amber-600':'text-xs text-muted-foreground'}>{row.sync_state==='needs_review'?'Atenção: revisão necessária':row.classification? (actionLabels[row.classification]??row.classification):row.relevance==='unknown'?'Não classificado':row.relevance==='irrelevant'?'Não relacionado':row.relevance==='agata'?'Relacionado à Agata':'Possível Noah'}</p></div>
     </div>)}
    </CardContent></Card>
    {more&&<Button variant="outline" className="w-full" disabled={fetching} onClick={()=>void load(true)}>
