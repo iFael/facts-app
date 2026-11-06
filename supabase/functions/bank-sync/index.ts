@@ -354,10 +354,25 @@ Deno.serve(async(request)=>{
   const pluggy=new FactsPluggyClient(config.clientId,config.clientSecret);
   const mail:MailConfiguration|null=config.emailKey&&config.emailTo&&config.emailFrom
     ?{key:config.emailKey,recipient:config.emailTo,sender:config.emailFrom}:null;
+  const body=await request.json().catch(()=>({}));
+  const selectedItem=body&&typeof body==='object'&&typeof body.itemId==='string'?body.itemId:null;
+  if(selectedItem&&!/^[a-f0-9-]{36}$/i.test(selectedItem))return response({error:'invalid_item'},400);
+  if(selectedItem&&!config.connections.some(row=>row.itemId===selectedItem))
+    return response({error:'item_not_registered'},404);
+  let webhookConfigured=false;
+  let webhookError:string|null=null;
   const summary:Summary={seen:0,ledger:0,imported:0,linkedExisting:0,replayed:0,
     needsReview:0,newReviews:0,notificationsSent:0,notificationsFailed:0,insightsQueued:0,insightsSent:0,insightsFailed:0,skipped:0};
   const today=businessDate();
   try{
+    if(!selectedItem){
+      try{
+        await pluggy.ensureWebhook('https://gpbsjmagjxpnoooldgtk.supabase.co/functions/v1/pluggy-webhook',config.webhookSecret);
+        webhookConfigured=true;
+      }catch(error){
+        webhookError=error instanceof Error?error.message:'webhook_registration_failed';
+      }
+    }
     for(const settings of config.settings){
       const rules=config.rules.filter((rule)=>rule.ownerId===settings.ownerId) as RecipientRule[];
       const learning=config.learningRules.filter((rule)=>rule.ownerId===settings.ownerId);
@@ -380,8 +395,12 @@ Deno.serve(async(request)=>{
         if(row.competence_month)pensionMonths.add(row.competence_month);
       }
 
-      const connections=config.connections.filter(connection=>connection.ownerId===settings.ownerId);
-      if(!connections.length)throw Error('pluggy_connections_missing');
+      const connections=config.connections.filter(connection=>
+        connection.ownerId===settings.ownerId&&(!selectedItem||connection.itemId===selectedItem));
+      if(!connections.length){
+        if(selectedItem)continue;
+        throw Error('pluggy_connections_missing');
+      }
       for(const connection of connections){
         const from=connection.lastSyncedAt
           ?overlapStart(settings.ledgerFrom,connection.lastSyncedAt.slice(0,10))
@@ -432,7 +451,7 @@ Deno.serve(async(request)=>{
     await flushNotifications(admin,mail,summary);
     await flushMonthlyInsights(admin,mail,summary);
     return response({ok:summary.notificationsFailed===0&&summary.insightsFailed===0,
-      mailConfigured:mail!==null,...summary});
+      webhookConfigured,webhookError,mailConfigured:mail!==null,...summary});
   }catch(error){
     console.error('bank-sync',error instanceof Error?error.message:'unknown');
     return response({error:'bank_sync_failed',summary},502);
