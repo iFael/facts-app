@@ -13,7 +13,7 @@ export function mapPluggyTransaction(
  raw:PluggyRawTransaction,itemId:string,accountId:string,institution:string|null,
 ):BankFeedTransaction{
  if(!raw||typeof raw.id!=='string'||raw.id.length<1||!Number.isFinite(raw.amount)
-  ||typeof raw.date!=='string'||!/^\\d{4}-\\d{2}-\\d{2}/.test(raw.date))
+  ||typeof raw.date!=='string'||!/^\d{4}-\d{2}-\d{2}/.test(raw.date))
   throw Error('PLUGGY_TRANSACTION_INVALID');
  const direction=raw.type?.toUpperCase();
  const participant=direction==='CREDIT'?(raw.paymentData?.payer??null):(raw.paymentData?.receiver??null);
