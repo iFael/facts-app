@@ -12,7 +12,9 @@ test('fato criado externamente aparece ao voltar para a aba sem reload',async({p
  await page.route(/\/rest\/v1\/facts_evidence\?/,route=>json(route,[]));
  await page.route(/\/rest\/v1\/facts\?/,route=>json(route,externalFact?[{id:'88888888-8888-4888-8888-888888888888',dependent_id:dependentId,kind:'event',title:'Atualização criada pelo ChatGPT',category:'outros',notes:'',occurred_at:'2026-09-15',amount_cents:null,transfer_purpose:null,request_total_cents:null,source:'chat',source_detail:null,created_by:'assistant',provenance_kind:'user_assertion',created_at:'2026-09-15T14:00:00.000Z',updated_at:'2026-09-15T14:00:00.000Z'}]:[]));
  await page.goto('/');
- await expect(page.getByText('Dependente Teste',{exact:true}).last()).toBeVisible();
+ await expect(page.getByRole('heading',{name:'Saldo previsto'})).toBeVisible();
+ await page.getByRole('button',{name:'Fatos',exact:true}).click();
+ await page.getByRole('button',{name:'Todo o histórico'}).click();
  await expect(page.getByText('Atualização criada pelo ChatGPT',{exact:true})).toHaveCount(0);
  externalFact=true;
  await page.evaluate(()=>window.dispatchEvent(new Event('focus')));

@@ -1,4 +1,5 @@
 /** Server-only Pluggy client owned entirely by Facts App. Never send API keys to the browser. */
+import {mapPluggyAccount,type AccountInventory} from '../../../src/bank/account-inventory.ts';
 const API='https://api.pluggy.ai';
 type JsonRecord=Record<string,unknown>;
 function record(value:unknown):JsonRecord{
@@ -54,6 +55,23 @@ export class FactsPluggyClient{
     rows.push({id,type,name:stringValue(row.marketingName)||stringValue(row.name)});
    }
    if(typeof data.totalPages!=='number'||page>=data.totalPages)return rows;
+  }
+  throw Error('PLUGGY_ACCOUNTS_PAGE_LIMIT');
+ }
+ /** Authorized read-only inventory. The returned fields are sanitized; no CPF or account numbers. */
+ async inventory(itemId:string,institution:string):Promise<AccountInventory[]>{
+  if(!/^[0-9a-f-]{36}$/i.test(itemId))throw Error('PLUGGY_ITEM_INVALID');
+  const items:AccountInventory[]=[];
+  for(let page=1;page<=50;page++){
+   const qs=new URLSearchParams({itemId,page:String(page),pageSize:'500'});
+   const data=await this.request('GET','/accounts?'+qs.toString());
+   if(!Array.isArray(data.results))throw Error('PLUGGY_ACCOUNTS_INVALID');
+   for(const account of data.results){
+    const row=record(account);
+    if(row.type!=='BANK'&&row.type!=='CREDIT')continue;
+    items.push(mapPluggyAccount(row,institution));
+   }
+   if(typeof data.totalPages!=='number'||page>=data.totalPages)return items;
   }
   throw Error('PLUGGY_ACCOUNTS_PAGE_LIMIT');
  }
