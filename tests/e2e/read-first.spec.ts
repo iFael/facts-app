@@ -15,14 +15,14 @@ async function openWorkspace(page:Page,width:number,height:number){
   });
  },userId);
  await page.reload();
- await expect(page.getByText('Dependente Teste',{exact:true}).last()).toBeVisible();
+ await expect(page.getByRole('heading',{name:'Saldo previsto'})).toBeVisible();
 }
 
 test('UI read-first separa Início, Extrato, Fatos, Documentos e Relatórios',async({page})=>{
  await openWorkspace(page,1280,900);
  const sidebar=page.locator('[data-slot="sidebar"]');
  for(const label of ['Início','Extrato','Fatos','Solicitações','Documentos','Relatórios'])await expect(sidebar.getByRole('button',{name:label,exact:true}).last()).toBeVisible();
- await expect(page.getByLabel('Mês dos registros')).toBeVisible();
+ await expect(page.getByLabel('Mês da visão geral')).toBeVisible();
  await sidebar.getByRole('button',{name:'Extrato',exact:true}).last().click();
  await expect(page.getByRole('heading',{name:'Extrato',exact:true})).toBeVisible();
  await expect(page.getByRole('heading',{name:'Movimentações',exact:true})).toBeVisible();

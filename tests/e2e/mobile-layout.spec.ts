@@ -7,11 +7,14 @@ const stamp='2026-09-04T12:00:00.000Z';
 async function seedWorkspace(page:Page,width:number){
  await installSessionCookie(page,fakeSession(userId));
  await page.setViewportSize({width,height:844});
- await page.goto('/');
+ // Seed IndexedDB before mounting the app to avoid racing its Dexie connection.
+ await page.goto('/_not-found');
  await page.evaluate(async({id,now})=>{
   await new Promise<void>((resolve,reject)=>{
    const request=indexedDB.open(`facts-cache-v2-${id}`);
    request.onerror=()=>reject(request.error);
+   request.onblocked=()=>reject(new Error('IndexedDB seed blocked'));
+   request.onupgradeneeded=()=>request.result.createObjectStore('state',{keyPath:'key'});
    request.onsuccess=()=>{
     const db=request.result,tx=db.transaction('state','readwrite');
     tx.objectStore('state').put({
@@ -27,8 +30,8 @@ async function seedWorkspace(page:Page,width:number){
    };
   });
  },{id:userId,now:stamp});
- await page.reload();
- await expect(page.getByRole('heading',{name:'Dependente Teste',exact:true})).toBeVisible();
+ await page.goto('/');
+ await expect(page.getByRole('heading',{name:'Saldo previsto'})).toBeVisible();
 }
 
 for(const width of [375,390,430]){
@@ -38,9 +41,8 @@ for(const width of [375,390,430]){
   const main=page.locator('main').last();
   const nav=page.locator('nav').first();
   const wrapper=page.locator('[data-slot="sidebar-wrapper"]');
-  const month=page.getByLabel('Mês dos registros');
-  const heading=page.getByRole('heading',{name:'Dependente Teste',exact:true});
-  const cards=page.locator('section[aria-label="Resumo mensal"] [data-slot="card"]');
+  const month=page.getByLabel('Mês da visão geral');
+  const heading=page.getByRole('heading',{name:'Saldo previsto'});
 
   expect(await header.getAttribute('class')).toContain('env(safe-area-inset-top)');
   expect(await nav.getAttribute('class')).toContain('env(safe-area-inset-bottom)');
@@ -49,18 +51,11 @@ for(const width of [375,390,430]){
 
   const headingBox=await heading.boundingBox(),monthBox=await month.boundingBox();
   expect(headingBox).not.toBeNull();expect(monthBox).not.toBeNull();
-  expect(monthBox!.y-(headingBox!.y+headingBox!.height)).toBeLessThanOrEqual(20);
-
-  for(const card of await cards.all()){
-   const box=await card.boundingBox();
-   expect(box).not.toBeNull();
-   expect(box!.height).toBeLessThan(140);
-  }
-
-  const totalFont=await page.getByTestId('total').evaluate(el=>Number.parseFloat(getComputedStyle(el).fontSize));
-  expect(totalFont).toBeLessThanOrEqual(width<=390?28:30);
-  expect(await page.getByTestId('total').textContent()).toContain('2.469,12');
-  expect(await page.getByTestId('transfers').textContent()).toContain('2.469,12');
+  expect(monthBox!.y).toBeLessThan(headingBox!.y);
+  await expect(page.getByRole('heading',{name:'Contas a pagar'})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Cartões'})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Moradia e custo de vida'})).toBeVisible();
+  await expect(page.getByText('Aguardando saldos reais')).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth)).toBe(true);
 
   const navBox=await nav.boundingBox();

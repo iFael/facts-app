@@ -13,5 +13,6 @@ supabase/.temp/
 *.tsbuildinfo
 .tmp-*
 .codex/
+.siwc-devkit/
 .playwright-production.config.ts
 .DS_Store
