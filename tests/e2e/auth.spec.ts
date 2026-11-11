@@ -25,7 +25,7 @@ test('reenvia confirmação para a origem atual sem afirmar entrega e aplica coo
  await expect(page.getByText('Solicitação de confirmação enviada ao provedor.',{exact:false})).toBeVisible();
  await expect(page.getByRole('button',{name:/Reenviar em \d+s/})).toBeDisabled();
  expect(resendBody).toMatchObject({email:'teste@example.com',type:'signup'});
- expect(decodeURIComponent(resendUrl)).toContain('redirect_to=http://127.0.0.1:4173');
+ expect(new URL(new URL(resendUrl).searchParams.get('redirect_to')!).origin).toBe(new URL(page.url()).origin);
 });
 
 test('informa conta já cadastrada sem tentar criar usuário novamente',async({page})=>{
@@ -50,7 +50,7 @@ test('solicita recuperação de senha para a origem atual sem revelar se a conta
  await page.getByRole('button',{name:'Enviar link de recuperação',exact:true}).click();
  await expect(page.getByText('Se existir uma conta para este e-mail',{exact:false})).toBeVisible();
  expect(recoverBody).toMatchObject({email:'existente@example.com'});
- expect(decodeURIComponent(recoverUrl)).toContain('redirect_to=http://127.0.0.1:4173');
+ expect(new URL(new URL(recoverUrl).searchParams.get('redirect_to')!).origin).toBe(new URL(page.url()).origin);
 });
 
 test('permite definir nova senha ao abrir uma sessão de recuperação',async({page})=>{
